@@ -1,7 +1,6 @@
 from PySide6.QtGui import QFont, QMouseEvent, QTextCursor
 from PySide6.QtWidgets import QTextEdit, QApplication
 from filecache import FileCache
-import sys
 
 
 class TextContent(QTextEdit):
@@ -48,7 +47,6 @@ class TextContent(QTextEdit):
 
     def loadTextInChunks(self, content: str, chunk_size: int = 5000):
         print("[DEBUG] 开始分段加载文本内容")
-        sys.stdout.flush()
         # 确保完全清空当前文本
         self.clear()
         self.document().clear()
