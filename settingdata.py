@@ -34,7 +34,18 @@ class SettingData:
 
     def readData(self):
         config.read('settings.ini', encoding='utf-8')
-        self.filePath = config.get('file', 'filePath')
+        try:
+            # 尝试读取 'filepath'（小写，与settings.ini匹配）
+            self.filePath = config.get('file', 'filepath')
+        except configparser.NoOptionError:
+            # 如果找不到，尝试读取 'filePath'（驼峰式）
+            try:
+                self.filePath = config.get('file', 'filePath')
+            except configparser.NoOptionError:
+                # 如果两种都找不到，设置为空字符串
+                self.filePath = ""
+                print("警告: 在settings.ini中找不到文件路径配置")
+        
         self.textLine = int(config.get('settings', 'textline'))
         self.lineSize = int(config.get('settings', 'linesize'))
         self.lineSpacing = int(config.get('settings', 'linespacing'))
@@ -62,7 +73,7 @@ class SettingData:
         self.outColor = QColor(self.outRed, self.outGreen, self.outBlue, self.outAlpha)
 
     def writeData(self):
-        config.set('file', 'filePath', self.filePath)
+        config.set('file', 'filepath', self.filePath)
         config.set('settings', 'textline', str(self.textLine))
         config.set('settings', 'linesize', str(self.lineSize))
         config.set('settings', 'linespacing', str(self.lineSpacing))
