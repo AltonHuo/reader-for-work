@@ -1,0 +1,10 @@
+__pycache__/
+.idea
+.ipynb_checkpoints
+datasets
+data
+results
+models
+!musetalk/models
+outputs
+/dist
