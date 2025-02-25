@@ -3,7 +3,7 @@ import re
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLineEdit, QPushButton, QHBoxLayout
 from PySide6.QtCore import Qt, QPoint, QSize
 from PySide6.QtGui import QMouseEvent, QGuiApplication, QPainter, QPen, QColor, QFontMetrics, \
-    QKeySequence, QShortcut, QAction, QIcon
+    QKeySequence, QShortcut, QAction, QIcon, QPixmap
 from settingdata import settingData
 
 
@@ -40,6 +40,14 @@ class ReadWindow(QWidget):
         self.initUI()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        # 添加一个标志来跟踪是否需要完全重绘
+        self.needFullRepaint = True
+
+        # 添加大小调整相关变量
+        self.resizing = False
+        self.resizeDirection = None
+        self.resizeMargin = 10  # 边缘调整大小的区域宽度
 
         self.selectChapter = QAction('选择章节')
         self.closeSelf = QAction('关闭')
@@ -61,20 +69,45 @@ class ReadWindow(QWidget):
         self.last.activated.connect(lambda: self.rollPageActive(settingData.currentPage - 1))
 
     def paintEvent(self, event):
-
-        painter = QPainter(self)
-        painter.setFont(settingData.qFont)
-        painter.setPen(self.qPen)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        # 创建一个全新的QPixmap作为绘制表面
+        pixmap = QPixmap(self.size())
+        # 使pixmap完全透明
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        # 在pixmap上创建一个新的painter
+        temp_painter = QPainter(pixmap)
+        temp_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        temp_painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        
+        # 设置字体和画笔
+        temp_painter.setFont(settingData.qFont)
+        temp_painter.setPen(self.qPen)
+        
+        # 绘制一个几乎透明的背景，以便接收鼠标事件
+        temp_painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        
+        # 绘制文本
         textLines = self.text.split('\n')
         metrics = QFontMetrics(settingData.qFont)
         yPosition = metrics.ascent()
-        # 遍历文本行列表
         for line in textLines:
-            # 在当前yPosition位置绘制文本行
-            painter.drawText(QPoint(0, yPosition), line)
-            # 更新yPosition位置为下一行文本的基线位置，包括行间距
+            temp_painter.drawText(QPoint(0, yPosition), line)
             yPosition += metrics.height() + settingData.lineSpacing
+        
+        # 完成pixmap上的绘制
+        temp_painter.end()
+        
+        # 现在将pixmap绘制到窗口上
+        window_painter = QPainter(self)
+        
+        # 如果需要完全重绘，先清除整个窗口
+        if self.needFullRepaint:
+            window_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            window_painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            window_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            self.needFullRepaint = False
+        
+        window_painter.drawPixmap(0, 0, pixmap)
 
     def initUI(self):
         # 计算文本高度和宽度
@@ -174,25 +207,91 @@ class ReadWindow(QWidget):
     #     self.searchMenu.show()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        # 如果按下的是鼠标左键，记录按下时的位置
+        # 检查是否在窗口边缘
+        x, y = event.pos().x(), event.pos().y()
+        width, height = self.width(), self.height()
+        
+        # 确定调整方向
         if event.button() == Qt.MouseButton.LeftButton:
-            self.mousePosition = event.pos()
+            # 左边缘
+            if x <= self.resizeMargin:
+                self.resizeDirection = "left"
+                self.resizing = True
+            # 右边缘
+            elif x >= width - self.resizeMargin:
+                self.resizeDirection = "right"
+                self.resizing = True
+            # 上边缘
+            elif y <= self.resizeMargin:
+                self.resizeDirection = "top"
+                self.resizing = True
+            # 下边缘
+            elif y >= height - self.resizeMargin:
+                self.resizeDirection = "bottom"
+                self.resizing = True
+            # 如果不是在边缘，则为拖动窗口
+            else:
+                self.resizing = False
+                self.mousePosition = event.pos()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        # 如果鼠标左键被按下，移动窗口
-        if event.buttons() & Qt.MouseButton.LeftButton:
+        # 如果正在调整大小
+        if self.resizing and event.buttons() & Qt.MouseButton.LeftButton:
+            x, y = event.pos().x(), event.pos().y()
+            geometry = self.geometry()
+            
+            if self.resizeDirection == "left":
+                width = geometry.width() - x
+                self.setGeometry(geometry.x() + x, geometry.y(), width, geometry.height())
+            elif self.resizeDirection == "right":
+                width = x
+                self.setGeometry(geometry.x(), geometry.y(), width, geometry.height())
+            elif self.resizeDirection == "top":
+                height = geometry.height() - y
+                self.setGeometry(geometry.x(), geometry.y() + y, geometry.width(), height)
+            elif self.resizeDirection == "bottom":
+                height = y
+                self.setGeometry(geometry.x(), geometry.y(), geometry.width(), height)
+            
+            # 更新文本布局以适应新的窗口大小
+            self.updateTextLayout()
+        # 如果是拖动窗口
+        elif event.buttons() & Qt.MouseButton.LeftButton:
             delta = event.pos() - self.mousePosition
             self.move(self.x() + delta.x(), self.y() + delta.y())
+        # 更新鼠标指针形状
+        else:
+            self.updateCursorShape(event.pos())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        # 鼠标释放时重置拖动位置
+        self.resizing = False
         self.mousePosition = QPoint()
+        # 重置鼠标指针
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def updateCursorShape(self, pos):
+        x, y = pos.x(), pos.y()
+        width, height = self.width(), self.height()
+        
+        # 左边缘或右边缘
+        if x <= self.resizeMargin or x >= width - self.resizeMargin:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        # 上边缘或下边缘
+        elif y <= self.resizeMargin or y >= height - self.resizeMargin:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        # 不在边缘
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def rollPageActive(self, page):
         text, _ = self.rollPage(page)
         if text:
             self.text = text
-            self.update()
+            self.needFullRepaint = True
+            
+            # 强制完全重绘
+            self.hide()
+            self.show()
 
     def enterEvent(self, event: QMouseEvent) -> None:
         self.qPen = QPen(settingData.qColor)
@@ -261,6 +360,39 @@ class ReadWindow(QWidget):
     #         if line >= settingData.textLine:
     #             page += 1
     #     searchMenu.displaySearchResult(result, self)
+
+    def resizeEvent(self, event):
+        """当窗口大小改变时调用此方法"""
+        super().resizeEvent(event)
+        # 重新计算文本布局
+        self.updateTextLayout()
+        # 标记需要完全重绘
+        self.needFullRepaint = True
+        # 更新显示
+        self.update()
+
+    def updateTextLayout(self):
+        """更新文本布局以适应当前窗口大小"""
+        # 获取当前窗口大小
+        width = self.width()
+        height = self.height()
+        
+        # 计算每行可以容纳的字符数
+        fontMetrics = QFontMetrics(settingData.qFont)
+        charWidth = fontMetrics.horizontalAdvance('中')  # 使用中文字符宽度作为参考
+        lineHeight = fontMetrics.height() + settingData.lineSpacing
+        
+        # 计算新的行大小和行数
+        newLineSize = max(1, int(width / charWidth))
+        newTextLine = max(1, int(height / lineHeight))
+        
+        # 如果行大小或行数发生变化，更新设置并重新加载文本
+        if newLineSize != settingData.lineSize or newTextLine != settingData.textLine:
+            settingData.lineSize = newLineSize
+            settingData.textLine = newTextLine
+            
+            # 重新加载当前页面的文本
+            self.text, _ = self.rollPage(settingData.currentPage)
 
 
 class ScrollableMenu(QWidget):
